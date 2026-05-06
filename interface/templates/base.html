@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MaternaAI{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+
+    <nav class="navbar">
+        <div class="container">
+            <a href="/" class="brand">
+                <span>🩺</span> MaternaAI
+            </a>
+            <div class="nav-links">
+                <a href="/" class="{% if request.path == '/' %}active{% endif %}">Home</a>
+                <a href="/diagnose" class="{% if request.path == '/diagnose' %}active{% endif %}">Diagnose</a>
+                <a href="/about">About</a>
+                <button class="chat-toggle-btn" onclick="toggleChat()">
+                    <span>💬</span> Chat
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Global Chat Panel -->
+    <div id="chat-panel" class="chat-panel">
+        <div class="chat-header">
+            <h4><span>🤖</span> MaternaAI Assistant</h4>
+            <div id="context-badge" class="context-badge" style="display: none;">Context Loaded</div>
+            <button onclick="toggleChat()" style="font-size: 1.25rem;">&times;</button>
+        </div>
+        <div id="chat-messages" class="chat-messages">
+            <div class="message bot">
+                Hello! I'm MaternaAI. I can help you understand the diagnosis results or answer questions about maternal health risks.
+            </div>
+        </div>
+        <div class="chat-footer">
+            <form id="chat-form" onsubmit="handleChatSubmit(event)">
+                <div class="chat-input-wrapper">
+                    <input type="text" id="chat-input" placeholder="Ask a question..." autocomplete="off">
+                    <button type="submit" class="send-btn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

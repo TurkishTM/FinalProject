@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maternal Health Risk - Full Report</title>
+    <style>
+        body { font-family: system-ui, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 2rem; }
+        h1, h2, h3 { color: #111; border-bottom: 1px solid #ccc; padding-bottom: 0.5rem; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 2rem; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background: #f4f4f4; }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; }
+        .high { background: #E05C7A; }
+        .mid { background: #F4A740; }
+        .low { background: #2BBFB3; }
+        .disclaimer { margin-top: 3rem; padding: 1rem; border: 2px solid #E05C7A; background: #fff5f5; font-size: 0.9rem; }
+        .print-btn { margin-bottom: 2rem; padding: 10px 20px; background: #2BBFB3; color: white; border: none; cursor: pointer; border-radius: 5px; font-size: 1rem; }
+        @media print {
+            .print-btn { display: none; }
+            body { padding: 0; margin: 0; max-width: 100%; }
+            .disclaimer { page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <button class="print-btn" onclick="window.print()">Print Report (PDF)</button>
+    
+    <h1>Maternal Health Risk - Diagnostic Report</h1>
+    
+    <div style="margin-bottom: 2rem;">
+        <strong>Verdict:</strong> 
+        <span class="badge {% if 'high' in result.verdict|lower %}high{% elif 'mid' in result.verdict|lower %}mid{% else %}low{% endif %}">
+            {{ result.verdict }}
+        </span>
+        <br>
+        <strong>Combined Certainty Factor:</strong> {{ result.final_cf }}
+    </div>
+
+    <h2>1. Patient Vitals</h2>
+    <table>
+        <tr><th>Feature</th><th>Value</th><th>Normal Range</th></tr>
+        <tr><td>Age</td><td>{{ patient.Age }}</td><td>Below 35</td></tr>
+        <tr><td>Systolic BP</td><td>{{ patient.SystolicBP }} mmHg</td><td>90 - 120</td></tr>
+        <tr><td>Diastolic BP</td><td>{{ patient.DiastolicBP }} mmHg</td><td>60 - 80</td></tr>
+        <tr><td>Blood Sugar</td><td>{{ patient.BS }} mmol/L</td><td>3.9 - 5.5 (Fasting)</td></tr>
+        <tr><td>Body Temp</td><td>{{ patient.BodyTemp }} °F</td><td>97 - 99</td></tr>
+        <tr><td>Heart Rate</td><td>{{ patient.HeartRate }} bpm</td><td>60 - 100</td></tr>
+    </table>
+    
+    <h2>2. Neural Network Pipeline</h2>
+    <p>{{ kb.pipeline }}</p>
+    <p><strong>Stage-2 Probabilities (Baseline):</strong></p>
+    <ul>
+        <li>High Risk: {{ (result.nn_probs['high risk'] * 100)|round(1) }}%</li>
+        <li>Mid Risk: {{ (result.nn_probs['mid risk'] * 100)|round(1) }}%</li>
+        <li>Low Risk: {{ (result.nn_probs['low risk'] * 100)|round(1) }}%</li>
+    </ul>
+
+    <h2>3. Complete Chain of Evidence</h2>
+    <table>
+        <tr><th>Step</th><th>Rule</th><th>CF</th><th>Clinical Meaning</th></tr>
+        {% for step in result.chain %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ step.name }}</td>
+            <td>{{ step.cf }}</td>
+            <td>
+                {% if step.name.startswith('rule: ') %}
+                    {% set rname = step.name.replace('rule: ', '') %}
+                    {{ kb.cf_rules[rname].clinical_meaning }}
+                {% else %}
+                    Seed certainty probability from Stage-2 Neural Network.
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    
+    <h2>4. AI Clinical Narrative</h2>
+    <div style="background: #f9f9f9; padding: 1.5rem; border-radius: 8px; border: 1px solid #eee;">
+        {{ summary | replace('\n', '<br>') | safe }}
+    </div>
+    
+    <div class="disclaimer">
+        <strong>IMPORTANT DISCLAIMER:</strong> {{ kb.important_disclaimer }}
+    </div>
+</body>
+</html>

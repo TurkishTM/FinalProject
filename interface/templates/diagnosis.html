@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="diagnosis-layout">
+        <!-- Input Form -->
+        <div class="form-card">
+            <h2 style="margin-bottom: 2rem;">Patient Vitals</h2>
+            <form id="diagnosis-form">
+                <div class="form-group">
+                    <label for="age">Age (years)</label>
+                    <input type="number" id="age" name="Age" required min="10" max="100" value="25">
+                    <p class="form-hint">Risk factor trigger: 35+</p>
+                </div>
+                <div class="form-group">
+                    <label for="systolic">Systolic BP (mmHg)</label>
+                    <input type="number" id="systolic" name="SystolicBP" required min="70" max="200" value="120">
+                    <p class="form-hint">Normal: 90–120. Trigger: 140+</p>
+                </div>
+                <div class="form-group">
+                    <label for="diastolic">Diastolic BP (mmHg)</label>
+                    <input type="number" id="diastolic" name="DiastolicBP" required min="40" max="130" value="80">
+                    <p class="form-hint">Normal: 60–80. Trigger: 90+</p>
+                </div>
+                <div class="form-group">
+                    <label for="bs">Blood Sugar (mmol/L)</label>
+                    <input type="number" step="0.1" id="bs" name="BS" required min="1" max="30" value="7.0">
+                    <p class="form-hint">Fasting normal: 3.9–5.5. Trigger: 11+</p>
+                </div>
+                <div class="form-group">
+                    <label for="bodytemp">Body Temperature (°F)</label>
+                    <input type="number" step="0.1" id="bodytemp" name="BodyTemp" required min="95" max="110" value="98.0">
+                    <p class="form-hint">Normal: 97–99. Trigger: 100+</p>
+                </div>
+                <div class="form-group">
+                    <label for="heartrate">Heart Rate (bpm)</label>
+                    <input type="number" id="heartrate" name="HeartRate" required min="40" max="200" value="75">
+                    <p class="form-hint">Normal: 60–100. Trigger: 90+</p>
+                </div>
+                <button type="submit" class="submit-btn" id="submit-btn">Run Diagnosis</button>
+            </form>
+        </div>
+
+        <!-- Result Panel (Placeholder) -->
+        <div id="result-panel" class="result-panel">
+            <!-- Content will be injected by diagnosis.js -->
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/diagnosis.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model weights — TOO LARGE for GitHub (3 GB)
+LLM/
+
+# Joblib models — also large, optional to exclude
+# models/
+
+# OS
+.DS_Store
+Thumbs.dbLLM/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <section class="hero">
+        <h1>Maternal Health Risk Assessment</h1>
+        <p>An explainable AI expert system powered by a dual-stage neural network and evidence-based clinical rules.</p>
+        <a href="/diagnose" class="cta-btn">Start Diagnosis →</a>
+    </section>
+
+    <div class="info-grid">
+        <div class="card">
+            <span class="card-icon">🧠</span>
+            <h3>Neural Network Chain</h3>
+            <p>Our system uses two stacked MLP models to capture complex nonlinear patterns in patient vitals, producing highly accurate baseline risk probabilities.</p>
+        </div>
+        <div class="card">
+            <span class="card-icon">📋</span>
+            <h3>Expert Rules (CF)</h3>
+            <p>A Certainty Factor (CF) ruleset incorporates clinical domain knowledge, adjusting the neural output based on high-impact physiological triggers.</p>
+        </div>
+        <div class="card">
+            <span class="card-icon">💬</span>
+            <h3>Explainable AI</h3>
+            <p>Integrated with Qwen2.5-1.5B-Instruct to provide real-time, grounded explanations of why a specific risk level was assigned to a patient.</p>
+        </div>
+    </div>
+
+    <section id="about" style="margin-top: 6rem; padding-bottom: 4rem;">
+        <h2 style="font-family: var(--font-serif); font-size: 2.5rem; text-align: center; margin-bottom: 2rem;">Built for Transparency</h2>
+        <div style="background: white; padding: 3rem; border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);">
+            <p style="margin-bottom: 1.5rem;">This project implements a <strong>Hybrid Expert System</strong>. While pure deep learning models often act as "black boxes," our hybrid approach ensures every diagnosis has a clear <em>Chain of Evidence</em>.</p>
+            <p>The system was trained on a dataset of 1,014 patients from rural health centers in Bangladesh, considering features such as Age, Blood Pressure, Blood Sugar, Body Temperature, and Heart Rate. By combining data-driven insights with clinical logic, we provide a tool that is both powerful and explainable.</p>
+        </div>
+    </section>
+</div>
+{% endblock %}
