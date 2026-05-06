@@ -29,11 +29,19 @@ def _combine_cf(cf1: float, cf2: float) -> float:
 
 def _check_rules(patient: dict) -> dict:
     return {
+        # High-value danger rules
         'high_bp':    patient['SystolicBP'] >= 140 or patient['DiastolicBP'] >= 90,
         'high_sugar': patient['BS']         >= 11,
         'fever':      patient['BodyTemp']   >= 100,
         'fast_heart': patient['HeartRate']  >= 90,
         'older_mom':  patient['Age']        >= 35,
+
+        # Low-value danger rules
+        'slow_heart': patient['HeartRate']  <= 50,
+        'low_bp':     patient['SystolicBP'] <= 80 or patient['DiastolicBP'] <= 50,
+        'low_sugar':  patient['BS']         <= 2.5,
+        'hypothermia':patient['BodyTemp']   <= 96,
+        'very_young': patient['Age']        <= 14,
     }
 
 def diagnose_patient(patient: dict) -> dict:

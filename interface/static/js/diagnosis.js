@@ -99,13 +99,19 @@ form.addEventListener('submit', async (e) => {
     }
 });
 
-const ALL_RULES = {
-    'high_bp': 0.70,
-    'high_sugar': 0.65,
-    'fever': 0.40,
-    'fast_heart': 0.50,
-    'older_mom': 0.30
-};
+const ALL_RULES = [
+    // existing
+    { key: 'high_bp',    label: 'High Blood Pressure',  threshold: 'SBP ≥ 140 or DBP ≥ 90' },
+    { key: 'high_sugar', label: 'High Blood Sugar',     threshold: 'BS ≥ 11 mmol/L' },
+    { key: 'fever',      label: 'Fever',                threshold: 'Temp ≥ 100°F' },
+    { key: 'fast_heart', label: 'Tachycardia',          threshold: 'HR ≥ 90 bpm' },
+    { key: 'older_mom',  label: 'Advanced Maternal Age',threshold: 'Age ≥ 35' },
+    { key: 'slow_heart', label: 'Bradycardia',          threshold: 'HR ≤ 50 bpm' },
+    { key: 'low_bp',     label: 'Low Blood Pressure',   threshold: 'SBP ≤ 80 or DBP ≤ 50' },
+    { key: 'low_sugar',  label: 'Hypoglycaemia',        threshold: 'BS ≤ 2.5 mmol/L' },
+    { key: 'hypothermia',label: 'Hypothermia',          threshold: 'Temp ≤ 96°F' },
+    { key: 'very_young', label: 'Adolescent Pregnancy', threshold: 'Age ≤ 14' },
+];
 
 function renderResult(r) {
     const riskClass = r.verdict.toLowerCase().includes('high') ? 'high'
@@ -140,7 +146,8 @@ function renderResult(r) {
 
     // Rules
     let chainIndex = 1;
-    for (const [ruleName, ruleCF] of Object.entries(ALL_RULES)) {
+    for (const ruleObj of ALL_RULES) {
+        const ruleName = ruleObj.key || ruleObj;
         const firedStep = r.chain.find(step => step.name === `rule: ${ruleName}`);
         if (firedStep) {
             chainHTML += `
@@ -156,7 +163,7 @@ function renderResult(r) {
                 <div class="chain-row" style="border-left: 2px dashed var(--border); padding-left: 1rem; margin-left: 11px; opacity: 0.5;">
                     <span class="chain-index" style="background: var(--bg-subtle); color: var(--text-muted);">-</span>
                     <span class="chain-name" style="text-decoration: line-through;">rule: ${ruleName}</span>
-                    <span class="chain-cf">cf=${ruleCF.toFixed(3)}</span>
+                    <span class="chain-cf"></span>
                     <span class="chain-running">→ DID NOT FIRE</span>
                 </div>
             `;
