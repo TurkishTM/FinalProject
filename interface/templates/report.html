@@ -14,6 +14,7 @@
         .high { background: #E05C7A; }
         .mid { background: #F4A740; }
         .low { background: #2BBFB3; }
+        .uncertain { background: #9CA3AF; }
         .disclaimer { margin-top: 3rem; padding: 1rem; border: 2px solid #E05C7A; background: #fff5f5; font-size: 0.9rem; }
         .print-btn { margin-bottom: 2rem; padding: 10px 20px; background: #2BBFB3; color: white; border: none; cursor: pointer; border-radius: 5px; font-size: 1rem; }
         @media print {
@@ -29,8 +30,8 @@
     <h1>Maternal Health Risk - Diagnostic Report</h1>
     
     <div style="margin-bottom: 2rem;">
-        <strong>Verdict:</strong> 
-        <span class="badge {% if 'high' in result.verdict|lower %}high{% elif 'mid' in result.verdict|lower %}mid{% else %}low{% endif %}">
+        <strong>Verdict:</strong>
+        <span class="badge {% if 'high' in result.verdict|lower %}high{% elif 'mid' in result.verdict|lower %}mid{% elif 'uncertain' in result.verdict|lower %}uncertain{% else %}low{% endif %}">
             {{ result.verdict }}
         </span>
         <br>
@@ -68,9 +69,13 @@
             <td>
                 {% if step.name.startswith('rule: ') %}
                     {% set rname = step.name.replace('rule: ', '') %}
-                    {{ kb.cf_rules[rname].clinical_meaning }}
+                    {% if rname in kb.cf_rules %}
+                        {{ kb.cf_rules[rname].clinical_meaning }}
+                    {% else %}
+                        Rule: {{ rname }} (clinical meaning not available)
+                    {% endif %}
                 {% else %}
-                    Seed certainty probability from Stage-2 Neural Network.
+                    Normalized seed CF from Stage-2 Neural Network (via nn_prob_to_cf).
                 {% endif %}
             </td>
         </tr>

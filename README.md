@@ -9,7 +9,7 @@
 This system takes 6 patient vitals and produces a grounded, explainable risk diagnosis:
 
 ```
-Patient Vitals (Age, BP, Blood Sugar, Temp, Heart Rate)
+Patient Vitals (Age, SystolicBP, DiastolicBP, BS, BodyTemp, HeartRate)
         │
         ▼
    NN₁ (Stage-1 MLP)  →  initial probability vector
@@ -18,7 +18,7 @@ Patient Vitals (Age, BP, Blood Sugar, Temp, Heart Rate)
    NN₂ (Stage-2 MLP)  →  refined probability vector
         │
         ▼
-   Expert System (Certainty Factors)  →  fires 5 clinical rules
+   Expert System (Certainty Factors)  →  fires up to 10 clinical rules (6 positive + 4 negative)
         │
         ▼
    Final Verdict: LOW / MID / HIGH risk  +  full chain of evidence
@@ -48,17 +48,22 @@ FinalProject/
 ├── data/
 │   └── Maternal Health Risk Data Set.csv   ← UCI dataset
 │
-├── models/                                 ← trained artefacts (all required)
+├── models/                                 ← trained artefacts
 │   ├── nn1.joblib                          ← Stage-1 MLP
 │   ├── nn2.joblib                          ← Stage-2 MLP
 │   ├── scaler.joblib                       ← fitted StandardScaler
 │   ├── label_encoder.joblib                ← int ↔ risk-label mapping
-│   └── preprocess_meta.joblib              ← skewed columns, CF rules, thresholds
+│   ├── preprocess_meta.joblib              ← skewed columns, CF rules, thresholds
+│   └── mlp_model.joblib                    ← orphaned (previous iteration, not used)
+│
+├── src/                                    ← shared pipeline module
+│   └── pipeline.py                         ← reusable training/loading functions
 │
 ├── interface/                              ← Flask web application
 │   ├── app.py                              ← routes + SSE streaming
 │   ├── predictor.py                        ← loads models, runs diagnose()
-│   ├── llm_engine.py                       ← loads Qwen, streams tokens
+│   ├── explainer.py                        ← template-based explanation generator
+│   ├── llm_engine.py                       ← loads Qwen, streams tokens (optional)
 │   ├── knowledge_base.py                   ← clinical facts + system prompt builder
 │   ├── static/
 │   │   ├── css/main.css
@@ -71,13 +76,18 @@ FinalProject/
 │       ├── diagnosis.html
 │       └── report.html
 │
-├── LLM/                                    ← NOT in repo (see setup below)
+├── tests/                                  ← automated test suite
+│   └── test_pipeline.py                    ← pytest tests for rules, CF logic, results
+│
+├── LLM/                                    ← NOT in repo (optional, see setup)
 │   └── Qwen2.5-1.5B-Instruct/
 │
 ├── final_project_explained.ipynb           ← full walkthrough with markdown
 ├── final_project.ipynb                     ← clean demo notebook
 ├── requirements.txt
-└── DOCUMENTATION.md
+├── DOCUMENTATION.md
+├── ENHANCEMENT_PLAN.md                     ← detailed improvement roadmap
+└── README.md
 ```
 
 ---
@@ -161,14 +171,14 @@ Runs the full NN₁ → NN₂ → Expert System pipeline.
 **Response:**
 ```json
 {
-  "verdict": "Likely HIGH risk",
-  "final_cf": 0.9872,
-  "nn_cf": 0.8213,
+  "verdict": "🔴 Likely HIGH risk",
+  "final_cf": 0.8721,
+  "nn_prob_high": 0.8213,
   "nn_probs": { "high risk": 0.8213, "mid risk": 0.1124, "low risk": 0.0663 },
-  "rules_fired": ["high_bp", "high_sugar", "fever", "fast_heart", "older_mom"],
+  "rules_fired": ["high_bp", "high_sugar", "fast_heart", "fever", "older_mom"],
   "chain": [
-    { "name": "NN_chain P(high)", "cf": 0.8213, "running": 0.8213 },
-    { "name": "rule: high_bp",    "cf": 0.70,   "running": 0.9464 }
+    { "name": "NN P(high)",       "cf": 0.3213, "running": 0.3213 },
+    { "name": "rule: high_bp",    "cf": 0.70,   "running": 0.7964 }
   ]
 }
 ```
@@ -188,6 +198,27 @@ Streams an LLM response as Server-Sent Events. Accepts the full conversation his
 
 **Response:** `text/event-stream` — tokens arrive as `data: <token>\n\n`, terminated by `data: [DONE]\n\n`.
 
+### `POST /api/explain`
+
+Generates a template-based explanation (no LLM required, instant response).
+
+**Request body:**
+```json
+{
+  "verdict": "🔴 Likely HIGH risk",
+  "rules_fired": ["high_bp", "high_sugar", "fever"],
+  "final_cf": 0.8721,
+  "nn_prob_high": 0.8213
+}
+```
+
+**Response:**
+```json
+{
+  "explanation": "Based on the clinical data provided, this patient shows **high risk** indicators...\n\n**Risk factors identified:**\n- The patient presents with high blood pressure...\n\n..."
+}
+```
+
 ### `GET /report?data=<base64>`
 
 Returns a printable HTML report for a patient. Pass the patient + result as a base64-encoded JSON blob.
@@ -196,21 +227,42 @@ Returns a printable HTML report for a patient. Pass the patient + result as a ba
 
 ## Expert System — Clinical Rules
 
-| Rule | Condition | Certainty Factor |
-|------|-----------|:---:|
-| `high_bp` | SystolicBP ≥ 140 **or** DiastolicBP ≥ 90 | 0.70 |
-| `high_sugar` | Blood Sugar ≥ 11 mmol/L | 0.65 |
-| `fast_heart` | Heart Rate ≥ 90 bpm | 0.50 |
-| `fever` | Body Temp ≥ 100 °F | 0.40 |
-| `older_mom` | Age ≥ 35 years | 0.30 |
+### Positive Rules (evidence FOR high risk)
 
-Rules combine with: **`total_cf = total_cf + cf × (1 − total_cf)`**
+| Rule | Condition | CF | Interpretation |
+|------|----------|:---:|---------------|
+| `high_bp` | SystolicBP ≥ 140 **or** DiastolicBP ≥ 90 | +0.70 | Strong evidence FOR high risk |
+| `borderline_bp` | 130 ≤ SystolicBP < 140 **or** 80 ≤ DiastolicBP < 90 | +0.25 | Weak evidence FOR high risk |
+| `high_sugar` | BS ≥ 11 mmol/L | +0.65 | Strong evidence FOR high risk |
+| `fast_heart` | HeartRate ≥ 90 bpm | +0.50 | Moderate evidence FOR high risk |
+| `fever` | BodyTemp ≥ 100.4°F | +0.40 | Moderate evidence FOR high risk |
+| `older_mom` | Age ≥ 35 years | +0.30 | Weak evidence FOR high risk |
+
+### Negative Rules (evidence AGAINST high risk)
+
+| Rule | Condition | CF | Interpretation |
+|------|----------|:---:|---------------|
+| `normal_bp` | SystolicBP < 120 **and** DiastolicBP < 80 | −0.40 | Moderate evidence AGAINST high risk |
+| `normal_sugar` | BS < 6.1 mmol/L | −0.35 | Moderate evidence AGAINST high risk |
+| `normal_heart` | 60 ≤ HeartRate ≤ 80 | −0.25 | Weak evidence AGAINST high risk |
+| `normal_temp` | 97°F ≤ BodyTemp ≤ 99°F | −0.20 | Weak evidence AGAINST high risk |
+
+### CF Combination (MYCIN formula)
+
+The NN probability is first converted to a seed CF via `nn_prob_to_cf()` (P=0→CF=−0.50, P=0.5→CF=0, P=1→CF=+0.50), then rules are combined using the MYCIN formula:
+
+- **Both CFs ≥ 0:** `total_cf = total_cf + new_cf × (1 − total_cf)`
+- **Both CFs ≤ 0:** `total_cf = total_cf + new_cf × (1 + total_cf)`
+- **Opposite signs:** `total_cf = (total_cf + new_cf) / (1 − min(|total_cf|, |new_cf|))`
+
+### Verdict Thresholds (CF scale: −1 to +1)
 
 | Final CF | Verdict |
 |----------|---------|
-| ≥ 0.70 | 🔴 Likely HIGH risk |
-| 0.40 – 0.69 | 🟡 Possibly MID risk |
-| < 0.40 | 🟢 Likely LOW risk |
+| ≥ 0.50 | 🔴 Likely HIGH risk |
+| 0.10 – 0.49 | 🟡 Possibly MID risk |
+| −0.10 – 0.09 | ⚪ Uncertain — borderline |
+| < −0.10 | 🟢 Likely LOW risk |
 
 ---
 

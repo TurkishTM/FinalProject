@@ -333,9 +333,10 @@ main {
   gap: 0.5rem;
 }
 
-.risk-high { background-color: var(--risk-high); }
-.risk-mid  { background-color: var(--risk-mid); }
-.risk-low  { background-color: var(--risk-low); }
+.risk-high     { background-color: var(--risk-high); }
+.risk-mid      { background-color: var(--risk-mid); }
+.risk-low      { background-color: var(--risk-low); }
+.risk-uncertain { background-color: #9CA3AF; }
 
 .verdict-text {
   font-size: var(--text-2xl);

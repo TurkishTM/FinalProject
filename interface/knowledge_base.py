@@ -23,33 +23,49 @@ The pipeline has three stages:
 1. NN₁ (Stage-1 MLP): reads the 6 scaled vitals, outputs P(low), P(mid), P(high).
 2. NN₂ (Stage-2 MLP): reads NN₁'s probabilities CONCATENATED with the scaled
    vitals (9 inputs total), and produces a refined probability vector.
-3. Expert System: takes NN₂'s P(high risk) as a seed certainty factor (CF),
-   then fires up to 10 clinical rules (5 high-value danger rules + 5 low-value
-   danger rules). Each rule that triggers adds its CF using the combination
-   formula: total_cf = total_cf + cf × (1 − total_cf).
-   Final verdict is thresholded: ≥0.70 → HIGH, 0.40–0.69 → MID, <0.40 → LOW.
+3. Expert System: converts NN₂'s P(high risk) to a normalized seed CF via
+   nn_prob_to_cf() (maps P=0→CF=-0.50, P=0.5→CF=0, P=1→CF=+0.50), then fires
+   up to 10 clinical rules (6 positive + 4 negative). Each rule that triggers
+   combines its CF using the MYCIN formula (handles both positive and negative CFs).
+   Final verdict is thresholded on the -1 to +1 scale:
+   ≥0.50 → HIGH, 0.10–0.49 → MID, -0.10–0.09 → UNCERTAIN, <-0.10 → LOW.
 """,
 
     "features": {
-        "Age":         "Mother's age in years. Risk increases above 35 (older_mom rule, CF=0.30) or below 14 (very_young rule, CF=0.60).",
-        "SystolicBP":  "Upper blood pressure (mmHg). ≥140 triggers high_bp (CF=0.70). ≤80 triggers low_bp (CF=0.50). Normal: 90–120.",
-        "DiastolicBP": "Lower blood pressure (mmHg). ≥90 triggers high_bp (CF=0.70). ≤50 triggers low_bp (CF=0.50). Normal: 60–80.",
-        "BS":          "Blood sugar (mmol/L). ≥11 triggers high_sugar (CF=0.65). ≤2.5 triggers low_sugar (CF=0.45). Normal fasting: 3.9–5.5.",
-        "BodyTemp":    "Body temperature (°F). ≥100 triggers fever (CF=0.40). ≤96 triggers hypothermia (CF=0.40). Normal: 97–99.",
-        "HeartRate":   "Heart rate (bpm). ≥90 triggers fast_heart (CF=0.50). ≤50 triggers slow_heart (CF=0.55). Normal: 60–100.",
+        "Age":         "Mother's age in years. Risk increases above 35 (older_mom rule, CF=+0.30). Normal: 18–34.",
+        "SystolicBP":  "Upper blood pressure (mmHg). ≥140 triggers high_bp (CF=+0.70); 130–139 triggers borderline_bp (CF=+0.25); <120 triggers normal_bp (CF=−0.40).",
+        "DiastolicBP": "Lower blood pressure (mmHg). ≥90 triggers high_bp (CF=+0.70); 80–89 triggers borderline_bp (CF=+0.25); <80 triggers normal_bp (CF=−0.40).",
+        "BS":          "Blood sugar (mmol/L). ≥11 triggers high_sugar (CF=+0.65); <6.1 triggers normal_sugar (CF=−0.35). Normal fasting: 3.9–5.5.",
+        "BodyTemp":    "Body temperature (°F). ≥100.4 triggers fever (CF=+0.40); 97–99 triggers normal_temp (CF=−0.20). Normal: 97–99.",
+        "HeartRate":   "Heart rate (bpm). ≥90 triggers fast_heart (CF=+0.50); 60–80 triggers normal_heart (CF=−0.25). Normal: 60–100.",
     },
 
     "cf_rules": {
-        # ── High-value danger rules ───────────────────────────────────────
+        # ── Positive rules (evidence FOR high risk) ──────────────────────
         "high_bp": {
             "threshold": "SystolicBP ≥ 140 OR DiastolicBP ≥ 90",
             "cf": 0.70,
             "clinical_meaning": "Hypertension in pregnancy is a major risk factor for preeclampsia and eclampsia."
         },
+        "borderline_bp": {
+            "threshold": "130 ≤ SystolicBP < 140 OR 80 ≤ DiastolicBP < 90",
+            "cf": 0.25,
+            "clinical_meaning": "Stage 1 hypertension in pregnancy can progress to more severe hypertension and warrants monitoring."
+        },
         "high_sugar": {
             "threshold": "BS ≥ 11 mmol/L",
             "cf": 0.65,
             "clinical_meaning": "Elevated blood sugar in pregnancy is associated with gestational diabetes, which raises risk of complications for mother and baby."
+        },
+        "hypoglycemia": {
+            "threshold": "BS < 3.9 mmol/L",
+            "cf": 0.45,
+            "clinical_meaning": "Hypoglycemia (low blood sugar) in pregnancy is dangerous and can cause fetal distress and maternal complications."
+        },
+        "borderline_sugar": {
+            "threshold": "7.0 < BS < 11.0 mmol/L",
+            "cf": 0.25,
+            "clinical_meaning": "Blood sugar in the pre-diabetic range suggests impaired glucose tolerance, which increases risk of gestational diabetes."
         },
         "fast_heart": {
             "threshold": "HeartRate ≥ 90 bpm",
@@ -57,7 +73,7 @@ The pipeline has three stages:
             "clinical_meaning": "Tachycardia may signal anaemia, infection, or cardiovascular stress, all of which are risk factors during pregnancy."
         },
         "fever": {
-            "threshold": "BodyTemp ≥ 100°F",
+            "threshold": "BodyTemp ≥ 100.4°F (38°C)",
             "cf": 0.40,
             "clinical_meaning": "Fever during pregnancy can indicate infection (e.g. UTI, sepsis) that elevates maternal risk."
         },
@@ -67,41 +83,37 @@ The pipeline has three stages:
             "clinical_meaning": "Advanced maternal age is associated with higher rates of gestational hypertension, diabetes, and chromosomal abnormalities."
         },
 
-        # ── Low-value danger rules ────────────────────────────────────────
-        "very_young": {
-            "threshold": "Age ≤ 14 years",
-            "cf": 0.60,
-            "clinical_meaning": "Adolescent pregnancy under age 14 carries significantly elevated obstetric risk including eclampsia, obstructed labour, and severe anaemia."
+        # ── Negative rules (evidence AGAINST high risk) ──────────────────
+        "normal_bp": {
+            "threshold": "SystolicBP < 120 AND DiastolicBP < 80",
+            "cf": -0.40,
+            "clinical_meaning": "Normal blood pressure reduces the likelihood of hypertensive disorders of pregnancy."
         },
-        "slow_heart": {
-            "threshold": "HeartRate ≤ 50 bpm",
-            "cf": 0.55,
-            "clinical_meaning": "Bradycardia in pregnancy can indicate cardiac dysfunction, medication overdose, or autonomic instability — all serious maternal risks."
+        "normal_sugar": {
+            "threshold": "3.9 ≤ BS ≤ 7.0 mmol/L",
+            "cf": -0.35,
+            "clinical_meaning": "Normal blood sugar makes gestational diabetes unlikely, reducing risk."
         },
-        "low_bp": {
-            "threshold": "SystolicBP ≤ 80 OR DiastolicBP ≤ 50",
-            "cf": 0.50,
-            "clinical_meaning": "Hypotension during pregnancy may signal haemorrhage, septic shock, or severe dehydration, all of which threaten mother and fetus."
+        "normal_heart": {
+            "threshold": "60 ≤ HeartRate ≤ 80 bpm",
+            "cf": -0.25,
+            "clinical_meaning": "A normal resting heart rate suggests good cardiovascular health during pregnancy."
         },
-        "low_sugar": {
-            "threshold": "BS ≤ 2.5 mmol/L",
-            "cf": 0.45,
-            "clinical_meaning": "Severe hypoglycaemia starves the fetus of glucose and can cause maternal unconsciousness or seizures."
-        },
-        "hypothermia": {
-            "threshold": "BodyTemp ≤ 96°F",
-            "cf": 0.40,
-            "clinical_meaning": "Subnormal body temperature may indicate sepsis, prolonged cold exposure, or severe metabolic disturbance during pregnancy."
+        "normal_temp": {
+            "threshold": "97°F ≤ BodyTemp ≤ 99°F",
+            "cf": -0.20,
+            "clinical_meaning": "Normal body temperature makes infection or sepsis less likely."
         },
     },
 
     "verdict_interpretation": {
-        "Likely HIGH risk":  "The patient's vitals suggest a high probability of serious pregnancy complications. Immediate medical review is strongly recommended.",
-        "Possibly MID risk": "The patient shows some concerning indicators. Regular monitoring and follow-up with a healthcare provider is advised.",
-        "Likely LOW risk":   "The patient's vitals are mostly within normal ranges. Routine prenatal care is still important.",
+        "🔴 Likely HIGH risk":      "The patient's vitals suggest a high probability of serious pregnancy complications. Immediate medical review is strongly recommended.",
+        "🟡 Possibly MID risk":     "The patient shows some concerning indicators. Regular monitoring and follow-up with a healthcare provider is advised.",
+        "⚪ Uncertain — borderline": "The evidence is mixed or inconclusive. Further assessment and monitoring are recommended.",
+        "🟢 Likely LOW risk":       "The patient's vitals are mostly within normal ranges. Routine prenatal care is still important.",
     },
 
-    "cf_formula": "total_cf = total_cf + cf × (1 − total_cf). This ensures no single piece of evidence can push certainty above 1, and each additional rule has a diminishing effect.",
+    "cf_formula": "MYCIN combination: if both CFs ≥ 0 → total_cf + new_cf × (1 − total_cf); if both ≤ 0 → total_cf + new_cf × (1 + total_cf); else → (total_cf + new_cf) / (1 − min(|total_cf|, |new_cf|)). The NN seed CF is mapped via nn_prob_to_cf(): P(high)=0→CF=−0.50, P(high)=0.5→CF=0, P(high)=1→CF=+0.50.",
 
     "dataset_source": "UCI Maternal Health Risk dataset — 1,014 de-identified patients from rural Bangladesh health centres, 2023. Features: Age, SystolicBP, DiastolicBP, BS, BodyTemp, HeartRate. Target: low / mid / high risk.",
 
@@ -132,44 +144,53 @@ ABOUT THE SYSTEM:
 PIPELINE:
 {KNOWLEDGE_BASE['pipeline']}
 
-CLINICAL RULES IN THIS SYSTEM (10 rules total — 5 high-value, 5 low-value):
+CLINICAL RULES IN THIS SYSTEM (12 rules total — 8 positive, 4 negative):
 
-HIGH-VALUE DANGER RULES:
-- high_bp    (CF=0.70): {r['high_bp']['threshold']}
+POSITIVE RULES (evidence FOR high risk):
+- high_bp       (CF=+0.70): {r['high_bp']['threshold']}
   Meaning: {r['high_bp']['clinical_meaning']}
-- high_sugar (CF=0.65): {r['high_sugar']['threshold']}
+- borderline_bp (CF=+0.25): {r['borderline_bp']['threshold']}
+  Meaning: {r['borderline_bp']['clinical_meaning']}
+- high_sugar    (CF=+0.65): {r['high_sugar']['threshold']}
   Meaning: {r['high_sugar']['clinical_meaning']}
-- fast_heart (CF=0.50): {r['fast_heart']['threshold']}
+- hypoglycemia  (CF=+0.45): {r['hypoglycemia']['threshold']}
+  Meaning: {r['hypoglycemia']['clinical_meaning']}
+- borderline_sugar (CF=+0.25): {r['borderline_sugar']['threshold']}
+  Meaning: {r['borderline_sugar']['clinical_meaning']}
+- fast_heart    (CF=+0.50): {r['fast_heart']['threshold']}
   Meaning: {r['fast_heart']['clinical_meaning']}
-- fever      (CF=0.40): {r['fever']['threshold']}
+- fever         (CF=+0.40): {r['fever']['threshold']}
   Meaning: {r['fever']['clinical_meaning']}
-- older_mom  (CF=0.30): {r['older_mom']['threshold']}
+- older_mom     (CF=+0.30): {r['older_mom']['threshold']}
   Meaning: {r['older_mom']['clinical_meaning']}
 
-LOW-VALUE DANGER RULES:
-- very_young  (CF=0.60): {r['very_young']['threshold']}
-  Meaning: {r['very_young']['clinical_meaning']}
-- slow_heart  (CF=0.55): {r['slow_heart']['threshold']}
-  Meaning: {r['slow_heart']['clinical_meaning']}
-- low_bp      (CF=0.50): {r['low_bp']['threshold']}
-  Meaning: {r['low_bp']['clinical_meaning']}
-- low_sugar   (CF=0.45): {r['low_sugar']['threshold']}
-  Meaning: {r['low_sugar']['clinical_meaning']}
-- hypothermia (CF=0.40): {r['hypothermia']['threshold']}
-  Meaning: {r['hypothermia']['clinical_meaning']}
+NEGATIVE RULES (evidence AGAINST high risk):
+- normal_bp     (CF=−0.40): {r['normal_bp']['threshold']}
+  Meaning: {r['normal_bp']['clinical_meaning']}
+- normal_sugar  (CF=−0.35): {r['normal_sugar']['threshold']}
+  Meaning: {r['normal_sugar']['clinical_meaning']}
+- normal_heart  (CF=−0.25): {r['normal_heart']['threshold']}
+  Meaning: {r['normal_heart']['clinical_meaning']}
+- normal_temp   (CF=−0.20): {r['normal_temp']['threshold']}
+  Meaning: {r['normal_temp']['clinical_meaning']}
 
 CERTAINTY FACTOR FORMULA:
 {KNOWLEDGE_BASE['cf_formula']}
 
+VERDICT THRESHOLDS (CF scale: −1 to +1):
+  CF ≥ 0.50       → 🔴 Likely HIGH risk
+  0.10 ≤ CF < 0.50 → 🟡 Possibly MID risk
+  −0.10 ≤ CF < 0.10 → ⚪ Uncertain — borderline
+  CF < −0.10      → 🟢 Likely LOW risk
+
 YOUR BEHAVIOUR RULES:
-1. Be warm, clear, and non-alarming. Never be blunt about risk without explaining what it means.
-2. When explaining the diagnosis, always ground your answer in the patient's ACTUAL vitals and which rules fired.
-3. Never invent statistics not present in this prompt. If unsure, say so.
-4. If asked about anything unrelated to maternal health or this system, politely redirect.
-5. Keep answers concise — 3 to 6 sentences unless the user asks for more detail.
+1. Keep answers BRIEF — 2 to 4 sentences maximum. Be concise and direct.
+2. Be warm, clear, and non-alarming. Never be blunt about risk without explaining what it means.
+3. When explaining the diagnosis, ground your answer in the patient's ACTUAL vitals and which rules fired.
+4. Never invent statistics not present in this prompt. If unsure, say so.
+5. If asked about anything unrelated to maternal health or this system, politely redirect.
 6. Always close with: remind the user this is an academic project and not medical advice.
-7. If both a high-value AND low-value rule fired (e.g. fast_heart AND slow_heart),
-   flag this as likely a data entry error and ask the user to double-check the inputs.
+7. Negative rules (normal_bp, normal_sugar, etc.) reduce the CF, making a LOW risk verdict more likely.
 
 IMPORTANT DISCLAIMER:
 {KNOWLEDGE_BASE['important_disclaimer']}
@@ -196,8 +217,8 @@ CURRENT PATIENT CONTEXT (use this to answer follow-up questions):
 
 DIAGNOSIS RESULT:
   Verdict:      {result.get('verdict')}
-  Final CF:     {result.get('final_cf')} (scale 0–1, higher = more certain of high risk)
-  NN₂ seed CF:  {result.get('nn_cf')}
+  Final CF:     {result.get('final_cf')} (scale −1 to +1, positive = evidence for high risk)
+  NN P(high):   {result.get('nn_prob_high')}
   Rules fired:  {rules_fired_str}
 
 NN₂ PROBABILITY BREAKDOWN:

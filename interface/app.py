@@ -5,6 +5,7 @@ from flask_cors import CORS
 from predictor import diagnose_patient
 from llm_engine import stream_response, generate_sync, LLM_AVAILABLE, llm_lock
 from knowledge_base import build_system_prompt, KNOWLEDGE_BASE
+from explainer import generate_explanation
 import os
 
 app = Flask(__name__)
@@ -20,33 +21,118 @@ def index():
 def diagnose_page():
     return render_template('diagnosis.html')
 
-@app.route('/about')
-def about_page():
-    return render_template('index.html', scroll_to='about')
-
 # ── API: run the expert system ─────────────────────────────────────────
+# ── Clinical validation rules ─────────────────────────────────────────────
+VALIDATION_RULES = {
+    'Age': {
+        'min': 15, 'max': 55,
+        'error': 'Age must be between 15 and 55 for a maternal patient. '
+                 'Age {val} is outside the valid maternal range.'
+    },
+    'SystolicBP': {
+        'min': 70, 'max': 200,
+        'error': 'Systolic BP {val} mmHg is outside the plausible range (70–200).'
+    },
+    'DiastolicBP': {
+        'min': 40, 'max': 150,
+        'error': 'Diastolic BP {val} mmHg is outside the plausible range (40–150).'
+    },
+    'BS': {
+        'min': 2.0, 'max': 30.0,
+        'error': 'Blood Sugar {val} mmol/L is outside the plausible range (2–30).'
+    },
+    'BodyTemp': {
+        'min': 95.0, 'max': 106.0,
+        'error': 'Body Temperature {val}°F is outside the plausible range (95–106).'
+    },
+    'HeartRate': {
+        'min': 40, 'max': 200,
+        'error': 'Heart Rate {val} bpm is outside the plausible range (40–200).'
+    },
+}
+
+def validate_patient(patient: dict) -> list:
+    """
+    Returns a list of error strings.
+    Empty list = patient is valid.
+    """
+    errors = []
+
+    for field, rules in VALIDATION_RULES.items():
+        val = patient.get(field)
+        if val is None:
+            errors.append(f"Missing required field: {field}")
+            continue
+        try:
+            val = float(val)
+        except (ValueError, TypeError):
+            errors.append(f"{field}: must be a number, got {type(val).__name__}")
+            continue
+        if val < rules['min'] or val > rules['max']:
+            errors.append(rules['error'].format(val=val))
+
+    # Cross-field check: DBP must be lower than SBP
+    sbp = patient.get('SystolicBP')
+    dbp = patient.get('DiastolicBP')
+    if sbp is not None and dbp is not None:
+        try:
+            sbp, dbp = float(sbp), float(dbp)
+            if dbp >= sbp:
+                errors.append(
+                    f"DiastolicBP ({dbp}) must be lower than SystolicBP ({sbp}). "
+                    f"These values are physiologically impossible together."
+                )
+        except (ValueError, TypeError):
+            pass
+
+    return errors
+
+
 @app.route('/api/diagnose', methods=['POST'])
 def api_diagnose():
     """
     Receives JSON: {Age, SystolicBP, DiastolicBP, BS, BodyTemp, HeartRate}
-    Returns JSON:  {verdict, final_cf, nn_cf, nn_probs, rules_fired, chain}
+    Returns JSON:  {verdict, final_cf, nn_prob_high, nn_probs, rules_fired, chain}
     """
     try:
         patient = request.get_json(force=True)
-        # Ensure all fields are present and numeric
+
+        # Validate input
+        errors = validate_patient(patient)
+        if errors:
+            return jsonify({
+                'error':   'Input validation failed',
+                'details': errors,
+                'code':    'INVALID_INPUT'
+            }), 400
+
+        # Convert to float
         required_fields = ['Age', 'SystolicBP', 'DiastolicBP', 'BS', 'BodyTemp', 'HeartRate']
-        
         for field in required_fields:
-            if field not in patient:
-                return jsonify({'error': f'Missing field: {field}'}), 400
-            try:
-                val = float(patient[field])
-                patient[field] = val
-            except ValueError:
-                return jsonify({'error': f'Invalid number for field: {field}'}), 400
-        
+            patient[field] = float(patient[field])
+
         result  = diagnose_patient(patient)
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ── API: template-based explanation ────────────────────────────────────
+@app.route('/api/explain', methods=['POST'])
+def api_explain():
+    """
+    Receives JSON: {verdict, rules_fired, final_cf, nn_prob_high}
+    Returns JSON: {explanation: markdown string}
+    """
+    try:
+        data = request.get_json(force=True)
+        explanation = generate_explanation(
+            verdict      = data.get('verdict', ''),
+            rules_fired  = data.get('rules_fired', []),
+            final_cf     = data.get('final_cf', 0.0),
+            nn_prob_high = data.get('nn_prob_high', 0.5),
+        )
+        return jsonify({"explanation": explanation})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -103,10 +189,18 @@ def generate_report():
     data_b64 = request.args.get('data')
     if not data_b64:
         return "Missing data parameter", 400
-    
+
     try:
-        # Decode base64 URL-safe JSON blob
-        json_str = base64.urlsafe_b64decode(data_b64).decode('utf-8')
+        # Decode URL-safe base64 (frontend uses btoa with URL-safe replacements)
+        # Restore standard base64 format
+        data_b64_standard = data_b64.replace('-', '+').replace('_', '/')
+        # Add padding if needed
+        padding = 4 - len(data_b64_standard) % 4
+        if padding != 4:
+            data_b64_standard += '=' * padding
+
+        # Decode base64
+        json_str = base64.urlsafe_b64decode(data_b64_standard).decode('utf-8')
         data = json.loads(json_str)
         patient = data.get('patient', {})
         result = data.get('result', {})
